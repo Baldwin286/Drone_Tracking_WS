@@ -1,7 +1,7 @@
 """Author: Pham Thanh Bien
    Date: 2025-09-20
    Description: A simple tracking drone using Python
-   Usage: python tracking_drone.py --connect <connection_string>"""
+   Usage: python tracking_drone.py --connect dev/ttyAMA0"""
 from dronekit import connect, VehicleMode, LocationGlobal, LocationGlobalRelative
 from pymavlink import mavutil 
 import time
@@ -23,7 +23,7 @@ def connectMyCopter():
   print("Autopilot capabilities (supports ftp): %s" % vehicle.capabilities.ftp)
   print("Global Location: %s" % vehicle.location.global_frame)
   print("Global Location (relative altitude): %s" % vehicle.location.global_relative_frame)
-  print("Local Location: %s" % vehicle.location.local_frame)    # NED
+  print("Local Location: %s" % vehicle.location.local_frame)                                
   print("Attitude: %s" % vehicle.attitude)
   print("Velocity: %s" % vehicle.velocity)
   print("GPS: %s" % vehicle.gps_0) 
@@ -38,12 +38,10 @@ def connectMyCopter():
   print("Heading: %s" % vehicle.heading)
   print("Is Armable?: %s" % vehicle.is_armable)
   print( "System status: %s" % vehicle.system_status.state)
-  print("Mode: %s" % vehicle.mode.name)    # settable
-  print("Armed: %s" % vehicle.armed)      # settable
+  print("Mode: %s" % vehicle.mode.name)                         # settable
+  print("Armed: %s" % vehicle.armed)                            # settable
   return  vehicle
   
-
-
 #arm and takeoff to meteres
 def arm_and_takeoff(aTargetAltitude):
     """

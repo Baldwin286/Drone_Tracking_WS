@@ -26,7 +26,7 @@ def stream_and_detect():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
     gst_str = (
-        "videoconvert ! "
+        "appsrc ! videoconvert ! "
         "x264enc tune=zerolatency bitrate=1000 speed-preset=superfast ! "
         "rtph264pay config-interval=1 pt=96 ! "
         "udpsink host=192.168.1.100 port=5000"

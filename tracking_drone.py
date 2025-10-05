@@ -22,15 +22,14 @@ def stream_and_detect():
         raise IOError("Unable to load the face cascade classifier xml file")
 
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
     gst_str = (
         "appsrc ! videoconvert ! "
         "x264enc tune=zerolatency bitrate=1000 speed-preset=superfast ! "
         "rtph264pay config-interval=1 pt=96 ! "
         "udpsink host=192.168.1.100 port=5000"
     )
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     if fps == 0:

@@ -196,17 +196,17 @@ vehicle = connectMyCopter()
 # ====== MAIN MISSION ======
 def my_mission():
     
-    # Bắt đầu phát video + nhận diện khuôn mặt song song
+    #start video stream + face detection in a separate thread
     stream_thread = threading.Thread(target=stream_and_detect, daemon=True)
     stream_thread.start()
 
-    # Cất cánh lên 5 mét và giữ tại chỗ
+    #takeoff to 5 meters
     arm_and_takeoff(vehicle, 5)
 
     print("[INFO] Hovering in place. Video streaming ongoing...")
 
     try:
-        # Drone hover tại chỗ, giữ chương trình sống
+        # Drone hover
         while True:
             time.sleep(1)
     except KeyboardInterrupt:

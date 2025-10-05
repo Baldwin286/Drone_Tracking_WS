@@ -8,8 +8,60 @@ import time
 import argparse
 import geopy.distance
 import numpy as np
+import cv2
+import threading
 
-#connect to drone
+# ====== STREAM + FACE DETECTION ======
+
+def stream_and_detect():
+    width = 320
+    height = 240
+
+    face_detect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt.xml')
+    if face_detect.empty():
+        raise IOError("Unable to load the face cascade classifier xml file")
+
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+    gst_str = (
+        "videoconvert ! "
+        "x264enc tune=zerolatency bitrate=1000 speed-preset=superfast ! "
+        "rtph264pay config-interval=1 pt=96 ! "
+        "udpsink host=192.168.1.100 port=5000"
+    )
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    if fps == 0:
+        fps = 30
+
+    out = cv2.VideoWriter(gst_str, cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
+
+    if not cap.isOpened() or not out.isOpened():
+        print("Camera or GStreamer pipeline not opened.")
+        return
+
+    print("[INFO] Streaming started...")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        resize_frame = cv2.resize(frame, (width, height))
+        gray = cv2.cvtColor(resize_frame, cv2.COLOR_BGR2GRAY)
+        faces = face_detect.detectMultiScale(gray, 1.3, 5)
+
+        for (x, y, w, h) in faces:
+            cv2.rectangle(resize_frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+        out.write(resize_frame)
+
+    cap.release()
+    out.release()
+
+# ====== DRONEKIT CONNECTION ======
+
 def connectMyCopter():
   parser =  argparse.ArgumentParser(description='commands')
   parser.add_argument('--connect')
@@ -42,7 +94,8 @@ def connectMyCopter():
   print("Armed: %s" % vehicle.armed)                            # settable
   return  vehicle
   
-#arm and takeoff to meteres
+# ====== ARM AND TAKEOFF ======
+
 def arm_and_takeoff(aTargetAltitude):
     """
     Arms vehicle and fly to aTargetAltitude.
@@ -77,51 +130,79 @@ def arm_and_takeoff(aTargetAltitude):
         time.sleep(1)
 
 
-def get_dstance(cord1, cord2):
-    #return distance n meter
-    return (geopy.distance.geodesic(cord1, cord2).km)*1000
+# def get_dstance(cord1, cord2):
+#     #return distance n meter
+#     return (geopy.distance.geodesic(cord1, cord2).km)*1000
 
 
-#connect to drone
+# #connect to drone
+# vehicle = connectMyCopter()
+
+
+# def goto_location(to_lat, to_long):    
+        
+#     print(" Global Location (relative altitude): %s" % vehicle.location.global_relative_frame)
+#     curr_lat = vehicle.location.global_relative_frame.lat
+#     curr_lon = vehicle.location.global_relative_frame.lon
+#     curr_alt = vehicle.location.global_relative_frame.alt
+
+#     # set to locaton (lat, lon, alt)
+#     to_lat = to_lat
+#     to_lon = to_long
+#     to_alt = curr_alt
+
+#     to_pont = LocationGlobalRelative(to_lat,to_lon,to_alt)
+#     vehicle.simple_goto(to_pont, groundspeed=1)
+    
+#     to_cord = (to_lat, to_lon)
+#     while True:
+#         curr_lat = vehicle.location.global_relative_frame.lat
+#         curr_lon = vehicle.location.global_relative_frame.lon
+#         curr_cord = (curr_lat, curr_lon)
+#         print("curr location: {}".format(curr_cord))
+#         distance = get_dstance(curr_cord, to_cord)
+#         print("distance ramaining {}".format(distance))
+#         if distance <= 2:
+#             print("Reached within 2 meters of target location...")
+#             break
+#         time.sleep(1)
+
+# def my_mission():
+#     arm_and_takeoff(5)
+#     goto_location(25.806476,86.778428)
+#     time.sleep(2)
+#     print("Returning to Launch")
+#     vehicle.mode = VehicleMode("RTL")
+    
+    
+    
+# # invoke the mission    
+# my_mission()
+
+# ====== CONNECT MY COPTER ======
 vehicle = connectMyCopter()
 
-
-def goto_location(to_lat, to_long):    
-        
-    print(" Global Location (relative altitude): %s" % vehicle.location.global_relative_frame)
-    curr_lat = vehicle.location.global_relative_frame.lat
-    curr_lon = vehicle.location.global_relative_frame.lon
-    curr_alt = vehicle.location.global_relative_frame.alt
-
-    # set to locaton (lat, lon, alt)
-    to_lat = to_lat
-    to_lon = to_long
-    to_alt = curr_alt
-
-    to_pont = LocationGlobalRelative(to_lat,to_lon,to_alt)
-    vehicle.simple_goto(to_pont, groundspeed=1)
-    
-    to_cord = (to_lat, to_lon)
-    while True:
-        curr_lat = vehicle.location.global_relative_frame.lat
-        curr_lon = vehicle.location.global_relative_frame.lon
-        curr_cord = (curr_lat, curr_lon)
-        print("curr location: {}".format(curr_cord))
-        distance = get_dstance(curr_cord, to_cord)
-        print("distance ramaining {}".format(distance))
-        if distance <= 2:
-            print("Reached within 2 meters of target location...")
-            break
-        time.sleep(1)
-
+# ====== MAIN MISSION ======
 def my_mission():
-    arm_and_takeoff(5)
-    goto_location(25.806476,86.778428)
-    time.sleep(2)
-    print("Returning to Launch")
-    vehicle.mode = VehicleMode("RTL")
     
-    
-    
-# invoke the mission    
-my_mission()
+    # Bắt đầu phát video + nhận diện khuôn mặt song song
+    stream_thread = threading.Thread(target=stream_and_detect, daemon=True)
+    stream_thread.start()
+
+    # Cất cánh lên 5 mét và giữ tại chỗ
+    arm_and_takeoff(vehicle, 5)
+
+    print("[INFO] Hovering in place. Video streaming ongoing...")
+
+    try:
+        # Drone hover tại chỗ, giữ chương trình sống
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[INFO] Mission interrupted by user.")
+        vehicle.mode = VehicleMode("LAND")
+        print("[INFO] Landing...")
+        time.sleep(5)
+
+if __name__ == "__main__":
+    my_mission()

@@ -21,40 +21,52 @@ def stream_and_detect():
     if face_detect.empty():
         raise IOError("Unable to load the face cascade classifier xml file")
 
-    cap = cv2.VideoCapture(0)
-    gst_str = (
-        "appsrc ! videoconvert ! "
-        "x264enc tune=zerolatency bitrate=1000 speed-preset=superfast ! "
-        "rtph264pay config-interval=1 pt=96 ! "
-        "udpsink host=192.168.1.100 port=5000"
-    )
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap = cv2.VideoCapture(0)  
+    if not cap.isOpened():
+        print("Camera Error!")
+        return
 
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     if fps == 0:
         fps = 30
 
-    out = cv2.VideoWriter(gst_str, cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
+    print(f"Camera: {width}x{height} @ {fps}fps")
 
-    if not cap.isOpened() or not out.isOpened():
-        print("Camera or GStreamer pipeline not opened.")
+    gst_str = (
+        f"appsrc ! video/x-raw,format=BGR,width={width},height={height},framerate={fps}/1 ! "
+        f"videoconvert ! "
+        f"x264enc tune=zerolatency bitrate=1000 speed-preset=superfast ! "
+        f"rtph264pay config-interval=1 pt=96 ! "
+        f"udpsink host=192.168.1.100 port=5000"
+    )
+
+    out = cv2.VideoWriter(
+        gst_str,
+        cv2.CAP_GSTREAMER,
+        0,
+        fps,
+        (width, height),
+        True
+    )
+
+    if not out.isOpened():
+        print("Pipeline Error!")
+        cap.release()
         return
 
-    print("[INFO] Streaming started...")
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        resize_frame = cv2.resize(frame, (width, height))
-        gray = cv2.cvtColor(resize_frame, cv2.COLOR_BGR2GRAY)
+        frame = cv2.resize(frame, (width, height))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_detect.detectMultiScale(gray, 1.3, 5)
 
-        for (x, y, w, h) in faces:
-            cv2.rectangle(resize_frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+        for (x,y,w,h) in faces:
+            cv2.rectangle(frame, (x,y), (x+w,y+h), (0,0,255), 2)
 
-        out.write(resize_frame)
+        out.write(frame)
 
     cap.release()
     out.release()

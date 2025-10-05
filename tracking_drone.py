@@ -17,7 +17,7 @@ def stream_and_detect():
     width = 320
     height = 240
 
-    face_detect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt.xml')
+    face_detect = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
     if face_detect.empty():
         raise IOError("Unable to load the face cascade classifier xml file")
 
@@ -96,7 +96,7 @@ def connectMyCopter():
   
 # ====== ARM AND TAKEOFF ======
 
-def arm_and_takeoff(aTargetAltitude):
+def arm_and_takeoff(vehicle, aTargetAltitude):
     """
     Arms vehicle and fly to aTargetAltitude.
     """
@@ -124,7 +124,7 @@ def arm_and_takeoff(aTargetAltitude):
     #  after Vehicle.simple_takeoff will execute immediately).
     while True:
         print(" Altitude: ", vehicle.location.global_relative_frame.alt)      
-        if vehicle.location.global_relative_frame.alt>=aTargetAltitude*0.95: #Trigger just below target alt.
+        if vehicle.location.global_relative_frame.alt>=aTargetAltitude*0.95: #Trigger just below target alt
             print("Reached target altitude")
             break
         time.sleep(1)

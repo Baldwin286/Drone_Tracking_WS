@@ -131,8 +131,6 @@ def arm_and_takeoff(vehicle, aTargetAltitude):
     print("Taking off!")
     vehicle.simple_takeoff(aTargetAltitude) # Take off to target altitude
 
-    # Wait until the vehicle reaches a safe height before processing the goto (otherwise the command 
-    #  after Vehicle.simple_takeoff will execute immediately).
     while True:
         print(" Altitude: ", vehicle.location.global_relative_frame.alt)      
         if vehicle.location.global_relative_frame.alt>=aTargetAltitude*0.95: #Trigger just below target alt
@@ -195,7 +193,7 @@ vehicle = connectMyCopter()
 
 # ====== MAIN MISSION ======
 def my_mission():
-    
+
     #start video stream + face detection in a separate thread
     stream_thread = threading.Thread(target=stream_and_detect, daemon=True)
     stream_thread.start()

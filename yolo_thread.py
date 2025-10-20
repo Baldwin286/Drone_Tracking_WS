@@ -65,6 +65,8 @@ def detection_loop(confidence=0.5, imgsz=640):
             continue
 
         try:
+            # Use model.predict so Ultralytics handles color/resize internally.
+            # stream=False returns a Results list
             results = model.predict(source=frame_copy, conf=confidence, imgsz=imgsz, device=device, verbose=False)
             if results and len(results) > 0:
                 with result_lock:
@@ -73,6 +75,7 @@ def detection_loop(confidence=0.5, imgsz=640):
                 with result_lock:
                     latest_result = None
         except Exception as e:
+            # print error but keep looping
             print("YOLO inference error:", e)
             with result_lock:
                 latest_result = None
@@ -111,23 +114,23 @@ def arm_and_takeoff(aTargetAltitude):
     return True
 
 MAX_SPEED = 1.0
-# def send_ned_velocity(vx, vy, vz, duration=0.2):
-#     vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
-#     vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
-#     vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
-#     msg = vehicle.message_factory.set_position_target_local_ned_encode(
-#         0, 0, 0,
-#         mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-#         0b0000111111000111,
-#         0, 0, 0,
-#         vx, vy, vz,
-#         0, 0, 0,
-#         0, 0)
-#     end = time.time() + duration
-#     while time.time() < end:
-#         vehicle.send_mavlink(msg)
-#         vehicle.flush()
-#         time.sleep(0.05)
+def send_ned_velocity(vx, vy, vz, duration=0.2):
+    vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
+    vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
+    vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
+    msg = vehicle.message_factory.set_position_target_local_ned_encode(
+        0, 0, 0,
+        mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+        0b0000111111000111,
+        0, 0, 0,
+        vx, vy, vz,
+        0, 0, 0,
+        0, 0)
+    end = time.time() + duration
+    while time.time() < end:
+        vehicle.send_mavlink(msg)
+        vehicle.flush()
+        time.sleep(0.05)
 
 # def move_towards_person(cx, cy, frame_w, frame_h, area):
 #     safe_distance_ratio = 0.15
@@ -146,88 +149,68 @@ MAX_SPEED = 1.0
 #     vz *= 0.5
 
 #     send_ned_velocity(vx, vy, vz, duration=0.2)
-
-# --- đảm bảo MAX_SPEED đã được khai báo trước ---
-MAX_SPEED = 1.0
-
-def send_ned_velocity(vx, vy, vz, duration=0.2):
-    """
-    Gửi lệnh velocity theo local NED.
-    Hàm này phải được định nghĩa trước khi gọi.
-    """
-    # clamp theo MAX_SPEED
-    vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
-    vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
-    vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
-
-    msg = vehicle.message_factory.set_position_target_local_ned_encode(
-        0, 0, 0,
-        mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-        0b0000111111000111,
-        0, 0, 0,
-        vx, vy, vz,
-        0, 0, 0,
-        0, 0)
-    end = time.time() + duration
-    while time.time() < end:
-        vehicle.send_mavlink(msg)
-        vehicle.flush()
-        time.sleep(0.05)
-
 def move_towards_person(cx, cy, frame_w, frame_h, area):
     """
-    Hàm điều khiển duy trì khoảng cách an toàn theo diện tích bbox.
-    Gọi send_ned_velocity(...) để gửi lệnh. send_ned_velocity phải tồn tại.
+    Duy trì khoảng cách an toàn dựa trên diện tích bbox.
+    - SAFE_RATIO: tỉ lệ diện tích an toàn so với diện tích khung
+    - HYSTERESIS: vùng chết (%) để tránh oscillation
+    - Kp, min_speed, max_speed: tuning
+    Mapping:
+      vx > 0 -> move forward (approach)
+      vx < 0 -> move backward (retreat)
+      vy -> right/left (image x)
+      vz -> up/down (image y) -- note: check sign mapping với NED nếu cần
     """
-    # --- THAM SỐ TUNE ---
-    SAFE_RATIO = 0.15       # tỉ lệ diện tích mong muốn
-    HYSTERESIS = 0.12       # vùng chết ±12%
-    KP_DIST = 0.8           # gain điều khiển tiến/lùi
-    KP_LAT = 0.5            # gain điều khiển ngang
-    KP_VERT = 0.5           # gain điều khiển dọc
-    MIN_SPEED = 0.07        # vận tốc tối thiểu
-    # -----------------------
+    # --- tham số (có thể tinh chỉnh) ---
+    SAFE_RATIO = 0.15      # % diện tích frame mong muốn (thử 0.10..0.18)
+    HYSTERESIS = 0.12      # 12% vùng chết
+    KP_DIST = 0.9          # hệ số tỉ lệ cho tiến/lùi
+    KP_LAT = 0.5           # hệ số tỉ lệ cho ngang
+    KP_VERT = 0.45         # hệ số tỉ lệ cho dọc
+    MIN_SPEED = 0.06       # vận tốc tối thiểu khi cần di chuyển
+    # MAX_SPEED dùng global MAX_SPEED
+    # -------------------------------
 
     frame_area = frame_w * frame_h
     safe_area = frame_area * SAFE_RATIO
-    upper_bound = safe_area * (1 + HYSTERESIS)
-    lower_bound = safe_area * (1 - HYSTERESIS)
+    lower = safe_area * (1 - HYSTERESIS)
+    upper = safe_area * (1 + HYSTERESIS)
 
-    # Điều khiển tiến/lùi: positive => tiến tới, negative => lùi ra
-    if area < lower_bound:
-        # quá xa -> tiến tới (vx > 0)
-        dist_error = (safe_area - area) / safe_area
-        vx = KP_DIST * dist_error
-    elif area > upper_bound:
-        # quá gần -> lùi ra (vx < 0)
-        dist_error = (safe_area - area) / safe_area
-        vx = KP_DIST * dist_error
+    # --- lateral & vertical control (centre the person) ---
+    vy = (cx - frame_w / 2) / (frame_w / 2)   # -1..1 -> left..right
+    vz = -(cy - frame_h / 2) / (frame_h / 2)  # -1..1 -> down..up (you may invert if needed)
+    vy_cmd = KP_LAT * vy
+    vz_cmd = KP_VERT * vz
+
+    # --- distance control (vx) with hysteresis ---
+    if area < lower:
+        # too far -> approach (vx > 0)
+        err = (safe_area - area) / safe_area
+        vx_cmd = KP_DIST * err
+    elif area > upper:
+        # too close -> retreat (vx < 0)
+        err = (safe_area - area) / safe_area
+        vx_cmd = KP_DIST * err
     else:
-        vx = 0.0
+        # within safe band -> hold distance (no forward/back)
+        vx_cmd = 0.0
 
-    # đảm bảo vượt ngưỡng tối thiểu để có hiệu lực
-    if 0 < abs(vx) < MIN_SPEED:
-        vx = np.sign(vx) * MIN_SPEED
+    # ensure sign convention: when area > safe_area (too close), err negative => vx_cmd negative
+    # but above err = (safe_area - area)/safe_area so will be negative when area>safe_area, so mapping OK
 
-    # Điều khiển ngang và dọc (scale -1..1)
-    vy = (cx - frame_w / 2) / (frame_w / 2)   # + => phải
-    vz = -(cy - frame_h / 2) / (frame_h / 2)  # + => lên (tùy mapping bạn có thể đảo dấu)
+    # force a minimal speed so small commands have effect
+    if 0 < abs(vx_cmd) < MIN_SPEED:
+        vx_cmd = np.sign(vx_cmd) * MIN_SPEED
 
-    vy *= KP_LAT
-    vz *= KP_VERT
+    # scale lateral/vertical so they don't exceed max
+    vy_cmd = float(np.clip(vy_cmd, -MAX_SPEED, MAX_SPEED))
+    vz_cmd = float(np.clip(vz_cmd, -MAX_SPEED, MAX_SPEED))
+    vx_cmd = float(np.clip(vx_cmd, -MAX_SPEED, MAX_SPEED))
 
-    # Clamp theo MAX_SPEED
-    vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
-    vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
-    vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
+    print(f"[move] area={int(area)} safe={int(safe_area)} lower={int(lower)} upper={int(upper)} "
+          f"vx={vx_cmd:.3f} vy={vy_cmd:.3f} vz={vz_cmd:.3f}")
 
-    # Debug
-    print(f"[MOVE] area={int(area)} safe={int(safe_area)} "
-          f"lb={int(lower_bound)} ub={int(upper_bound)} vx={vx:.2f} vy={vy:.2f} vz={vz:.2f}")
-
-    # Gửi lệnh (lưu ý hệ NED: +vx = North/forward; +vz = down)
-    # Nếu bạn muốn vz mapping khác, thay đổi dấu khi cần.
-    send_ned_velocity(vx, vy, vz, duration=0.2)
+    send_ned_velocity(vx_cmd, vy_cmd, vz_cmd, duration=0.2)
 
 # ==================== main ==================== #
 if __name__ == "__main__":
@@ -249,7 +232,7 @@ if __name__ == "__main__":
             vehicle.close()
             sys.exit(1)
 
-        print("Starting main loop...")
+        print("🎥 Starting main loop...")
         prev_time = time.time()
 
         while True:

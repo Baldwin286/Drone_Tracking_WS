@@ -1,3 +1,7 @@
+# Author: Pham Thanh Bien
+# Date: 2025-09-25
+# Description: A simple tracking drone using YOLO model in Gazebo simulation
+# Run terminal: python thead_tracking_gazebo_sim.py with gz and ardupilot SITL
 import cv2
 import torch
 import numpy as np
@@ -20,7 +24,6 @@ print("Using device:", device)
 
 MODEL_PATH = '/home/phamthanhbien/yolo/my_model.pt'
 if not torch.cuda.is_available():
-    # no change, but print hint
     print("Note: CUDA not available -> model will run on CPU (slower).")
 
 model = YOLO(MODEL_PATH).to(device)
@@ -113,7 +116,7 @@ def arm_and_takeoff(aTargetAltitude):
         time.sleep(0.5)
     return True
 
-MAX_SPEED = 1.0
+MAX_SPEED = 1
 def send_ned_velocity(vx, vy, vz, duration=0.2):
     vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
     vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
@@ -150,26 +153,14 @@ def send_ned_velocity(vx, vy, vz, duration=0.2):
 
 #     send_ned_velocity(vx, vy, vz, duration=0.2)
 def move_towards_person(cx, cy, frame_w, frame_h, area):
-    """
-    Duy trì khoảng cách an toàn dựa trên diện tích bbox.
-    - SAFE_RATIO: tỉ lệ diện tích an toàn so với diện tích khung
-    - HYSTERESIS: vùng chết (%) để tránh oscillation
-    - Kp, min_speed, max_speed: tuning
-    Mapping:
-      vx > 0 -> move forward (approach)
-      vx < 0 -> move backward (retreat)
-      vy -> right/left (image x)
-      vz -> up/down (image y) -- note: check sign mapping với NED nếu cần
-    """
-    # --- tham số (có thể tinh chỉnh) ---
-    SAFE_RATIO = 0.15      # % diện tích frame mong muốn (thử 0.10..0.18)
-    HYSTERESIS = 0.12      # 12% vùng chết
-    KP_DIST = 0.9          # hệ số tỉ lệ cho tiến/lùi
-    KP_LAT = 0.5           # hệ số tỉ lệ cho ngang
-    KP_VERT = 0.45         # hệ số tỉ lệ cho dọc
-    MIN_SPEED = 0.06       # vận tốc tối thiểu khi cần di chuyển
-    # MAX_SPEED dùng global MAX_SPEED
-    # -------------------------------
+    # parameters
+    SAFE_RATIO = 0.50               # area of frame desire 
+    HYSTERESIS = 0.12               # deadband
+    KP_DIST = 0.6                   # Forward/backward gain
+    KP_LAT = 0.5                    # Horizontal gain (left/right)
+    KP_VERT = 0.5                   # Vertical gain (up/down)
+    MIN_SPEED = 0.06                # velocity minimum to overcome inertia
+    MIN_AREA_THRESHOLD = 0.7        # Person occupies 70% of frame
 
     frame_area = frame_w * frame_h
     safe_area = frame_area * SAFE_RATIO
@@ -178,31 +169,36 @@ def move_towards_person(cx, cy, frame_w, frame_h, area):
 
     # --- lateral & vertical control (centre the person) ---
     vy = (cx - frame_w / 2) / (frame_w / 2)   # -1..1 -> left..right
-    vz = -(cy - frame_h / 2) / (frame_h / 2)  # -1..1 -> down..up (you may invert if needed)
+    vz = -(cy - frame_h / 2) / (frame_h / 2)  # -1..1 -> down..up 
     vy_cmd = KP_LAT * vy
     vz_cmd = KP_VERT * vz
 
-    # --- distance control (vx) with hysteresis ---
+    # --- distance control (vx) ---
     if area < lower:
-        # too far -> approach (vx > 0)
+        # Far -> move forward (vx > 0)
         err = (safe_area - area) / safe_area
         vx_cmd = KP_DIST * err
     elif area > upper:
-        # too close -> retreat (vx < 0)
-        err = (safe_area - area) / safe_area
-        vx_cmd = KP_DIST * err
+        # Near -> step back (vx < 0)
+        err = (area - safe_area) / safe_area
+        vx_cmd = -KP_DIST * err  
     else:
-        # within safe band -> hold distance (no forward/back)
-        vx_cmd = 0.0
+        # Safety area -> stay position
+        vx_cmd = 0.0         
 
-    # ensure sign convention: when area > safe_area (too close), err negative => vx_cmd negative
-    # but above err = (safe_area - area)/safe_area so will be negative when area>safe_area, so mapping OK
+    # --- Vertical control (up/down) ---
+    if area < safe_area * 0.1:  
+        vz_cmd = -0.2  
+    elif area >= safe_area * MIN_AREA_THRESHOLD:
+        vz_cmd = 0.0
+    else:
+        vz_cmd = 0.0     
 
-    # force a minimal speed so small commands have effect
+    # Force a minimal speed so small commands have effect
     if 0 < abs(vx_cmd) < MIN_SPEED:
         vx_cmd = np.sign(vx_cmd) * MIN_SPEED
 
-    # scale lateral/vertical so they don't exceed max
+    # Scale lateral/vertical so they don't exceed max
     vy_cmd = float(np.clip(vy_cmd, -MAX_SPEED, MAX_SPEED))
     vz_cmd = float(np.clip(vz_cmd, -MAX_SPEED, MAX_SPEED))
     vx_cmd = float(np.clip(vx_cmd, -MAX_SPEED, MAX_SPEED))
@@ -232,7 +228,7 @@ if __name__ == "__main__":
             vehicle.close()
             sys.exit(1)
 
-        print("🎥 Starting main loop...")
+        print("Starting main loop...")
         prev_time = time.time()
 
         while True:
@@ -298,21 +294,32 @@ if __name__ == "__main__":
 
     finally:
         stop_threads = True
-        # give threads a moment to finish
         time.sleep(0.2)
+
         try:
+            print("Switching to RTL mode...")
+            vehicle.mode = VehicleMode("RTL")
+            time.sleep(2)  
+
+            print("Switching to LAND mode...")
             vehicle.mode = VehicleMode("LAND")
-            time.sleep(2)
-        except Exception:
-            pass
+            time.sleep(2)  
+
+        except Exception as e:
+            print(f"Error during RTL/LAND: {e}")
+
+        # Closing connection safely
         try:
             vehicle.close()
-        except Exception:
-            pass
+            print("Vehicle connection closed.")
+        except Exception as e:
+            print(f"Error closing vehicle: {e}")
+
         try:
             if cap is not None:
                 cap.release()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error releasing camera: {e}")
+        
         cv2.destroyAllWindows()
         print("Closed and landed safely.")

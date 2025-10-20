@@ -111,55 +111,123 @@ def arm_and_takeoff(aTargetAltitude):
     return True
 
 MAX_SPEED = 1.0
+# def send_ned_velocity(vx, vy, vz, duration=0.2):
+#     vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
+#     vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
+#     vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
+#     msg = vehicle.message_factory.set_position_target_local_ned_encode(
+#         0, 0, 0,
+#         mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+#         0b0000111111000111,
+#         0, 0, 0,
+#         vx, vy, vz,
+#         0, 0, 0,
+#         0, 0)
+#     end = time.time() + duration
+#     while time.time() < end:
+#         vehicle.send_mavlink(msg)
+#         vehicle.flush()
+#         time.sleep(0.05)
+
+# def move_towards_person(cx, cy, frame_w, frame_h, area):
+#     safe_distance_ratio = 0.15
+#     frame_area = frame_w * frame_h
+#     safe_area = frame_area * safe_distance_ratio
+
+#     vy = (cx - frame_w / 2) / (frame_w / 2)   # horizontal -> rotate left/right
+#     vz = -(cy - frame_h / 2) / (frame_h / 2)  # vertical -> up/down
+
+#     # far -> move forward/near -> step back
+#     dist_error = (safe_area - area) / safe_area
+#     vx = np.clip(dist_error, -1, 1)
+
+#     vx *= 0.5
+#     vy *= 0.5
+#     vz *= 0.5
+
+#     send_ned_velocity(vx, vy, vz, duration=0.2)
+
+# --- đảm bảo MAX_SPEED đã được khai báo trước ---
+MAX_SPEED = 1.0
+
+def send_ned_velocity(vx, vy, vz, duration=0.2):
+    """
+    Gửi lệnh velocity theo local NED.
+    Hàm này phải được định nghĩa trước khi gọi.
+    """
+    # clamp theo MAX_SPEED
+    vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
+    vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
+    vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
+
+    msg = vehicle.message_factory.set_position_target_local_ned_encode(
+        0, 0, 0,
+        mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+        0b0000111111000111,
+        0, 0, 0,
+        vx, vy, vz,
+        0, 0, 0,
+        0, 0)
+    end = time.time() + duration
+    while time.time() < end:
+        vehicle.send_mavlink(msg)
+        vehicle.flush()
+        time.sleep(0.05)
+
 def move_towards_person(cx, cy, frame_w, frame_h, area):
-    SAFE_RATIO = 0.15       # tỉ lệ diện tích mong muốn (15% frame)
+    """
+    Hàm điều khiển duy trì khoảng cách an toàn theo diện tích bbox.
+    Gọi send_ned_velocity(...) để gửi lệnh. send_ned_velocity phải tồn tại.
+    """
+    # --- THAM SỐ TUNE ---
+    SAFE_RATIO = 0.15       # tỉ lệ diện tích mong muốn
     HYSTERESIS = 0.12       # vùng chết ±12%
     KP_DIST = 0.8           # gain điều khiển tiến/lùi
     KP_LAT = 0.5            # gain điều khiển ngang
     KP_VERT = 0.5           # gain điều khiển dọc
     MIN_SPEED = 0.07        # vận tốc tối thiểu
-    # --------------------------
+    # -----------------------
 
     frame_area = frame_w * frame_h
     safe_area = frame_area * SAFE_RATIO
     upper_bound = safe_area * (1 + HYSTERESIS)
     lower_bound = safe_area * (1 - HYSTERESIS)
 
-    # --- Điều khiển khoảng cách (vx: tiến/lùi) ---
+    # Điều khiển tiến/lùi: positive => tiến tới, negative => lùi ra
     if area < lower_bound:
-        # Xa -> tiến tới (vx > 0)
+        # quá xa -> tiến tới (vx > 0)
         dist_error = (safe_area - area) / safe_area
         vx = KP_DIST * dist_error
     elif area > upper_bound:
-        # gần -> lùi ra (vx < 0)
+        # quá gần -> lùi ra (vx < 0)
         dist_error = (safe_area - area) / safe_area
         vx = KP_DIST * dist_error
     else:
-        # Trong vùng an toàn -> giữ nguyên
         vx = 0.0
 
+    # đảm bảo vượt ngưỡng tối thiểu để có hiệu lực
     if 0 < abs(vx) < MIN_SPEED:
         vx = np.sign(vx) * MIN_SPEED
 
-    # --- Điều khiển ngang (vy) & dọc (vz) ---
-    vy = (cx - frame_w / 2) / (frame_w / 2)
-    vz = -(cy - frame_h / 2) / (frame_h / 2)
+    # Điều khiển ngang và dọc (scale -1..1)
+    vy = (cx - frame_w / 2) / (frame_w / 2)   # + => phải
+    vz = -(cy - frame_h / 2) / (frame_h / 2)  # + => lên (tùy mapping bạn có thể đảo dấu)
 
     vy *= KP_LAT
     vz *= KP_VERT
 
-    # --- Giới hạn vận tốc ---
+    # Clamp theo MAX_SPEED
     vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
     vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
     vz = float(np.clip(vz, -MAX_SPEED, MAX_SPEED))
 
+    # Debug
     print(f"[MOVE] area={int(area)} safe={int(safe_area)} "
-          f"bounds=({int(lower_bound)}, {int(upper_bound)}) "
-          f"vx={vx:.2f} vy={vy:.2f} vz={vz:.2f}")
+          f"lb={int(lower_bound)} ub={int(upper_bound)} vx={vx:.2f} vy={vy:.2f} vz={vz:.2f}")
 
-    # --- Gửi vận tốc tới drone ---
+    # Gửi lệnh (lưu ý hệ NED: +vx = North/forward; +vz = down)
+    # Nếu bạn muốn vz mapping khác, thay đổi dấu khi cần.
     send_ned_velocity(vx, vy, vz, duration=0.2)
-
 
 # ==================== main ==================== #
 if __name__ == "__main__":

@@ -194,11 +194,11 @@ def move_towards_person(cx, cy, frame_w, frame_h, area):
     else:
         vz_cmd = 0.0     
 
-    # Force a minimal speed so small commands have effect
+    # Force a minimal speed 
     if 0 < abs(vx_cmd) < MIN_SPEED:
         vx_cmd = np.sign(vx_cmd) * MIN_SPEED
 
-    # Scale lateral/vertical so they don't exceed max
+    # Scale lateral/vertical
     vy_cmd = float(np.clip(vy_cmd, -MAX_SPEED, MAX_SPEED))
     vz_cmd = float(np.clip(vz_cmd, -MAX_SPEED, MAX_SPEED))
     vx_cmd = float(np.clip(vx_cmd, -MAX_SPEED, MAX_SPEED))

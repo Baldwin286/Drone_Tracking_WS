@@ -7,7 +7,6 @@ from threading import Thread, Lock, Event
 from dronekit import connect, VehicleMode
 from pymavlink import mavutil
 from ultralytics import YOLO
-import math
 import logging
 
 # ==================== CONFIG ==================== #
@@ -41,7 +40,7 @@ stop_event = Event()
 cap = None
 last_detection_time = time.time()
 
-# ==================== FUNCTIONS ==================== #
+# ==================== DRONE CONTROL ==================== #
 def send_ned_velocity(vx, vy, vz, duration=0.2):
     vx, vy, vz = [float(np.clip(v, -MAX_SPEED, MAX_SPEED)) for v in (vx, vy, vz)]
     msg = vehicle.message_factory.set_position_target_local_ned_encode(
@@ -73,7 +72,6 @@ def arm_and_takeoff(aTargetAltitude):
             return False
         print(" Waiting for arm...")
         time.sleep(0.5)
-
     print(f"Taking off to {aTargetAltitude} m")
     vehicle.simple_takeoff(aTargetAltitude)
     while True:
@@ -85,7 +83,7 @@ def arm_and_takeoff(aTargetAltitude):
         time.sleep(0.5)
     return True
 
-# ==================== YOLO + CAMERA THREADS ==================== #
+# ==================== CAMERA THREAD ==================== #
 def capture_loop():
     global latest_frame, cap
     cap_local = cv2.VideoCapture(0)
@@ -103,6 +101,7 @@ def capture_loop():
     cap_local.release()
     print("Camera stopped.")
 
+# ==================== YOLO THREAD ==================== #
 def detection_loop(confidence=0.5, imgsz=640):
     global latest_result, last_detection_time
     while not stop_event.is_set():
@@ -118,7 +117,7 @@ def detection_loop(confidence=0.5, imgsz=640):
             if results and len(results) > 0:
                 with result_lock:
                     latest_result = results[0]
-                    last_detection_time = time.time()  
+                    last_detection_time = time.time()
             else:
                 with result_lock:
                     latest_result = None
@@ -145,8 +144,7 @@ def move_towards_person(cx, cy, frame_w, frame_h, area):
     else:
         vx_cmd = 0.0
 
-    vz_cmd = 0.0  
-
+    vz_cmd = 0.0
     vx_cmd, vy_cmd, vz_cmd = [float(np.clip(v, -MAX_SPEED, MAX_SPEED)) for v in (vx_cmd, vy_cmd, vz_cmd)]
     print(f"[move] vx={vx_cmd:.2f} vy={vy_cmd:.2f} area={int(area)} safe={int(safe_area)}")
     send_ned_velocity(vx_cmd, vy_cmd, vz_cmd, duration=1.0 / COMMAND_RATE_HZ)
@@ -178,7 +176,7 @@ if __name__ == "__main__":
                 res = latest_result
 
             now = time.time()
-            fps = 1.0 / (now - prev_time)
+            fps = 1.0 / (now - prev_time) if (now - prev_time) > 0 else 0.0
             prev_time = now
 
             if res is not None and hasattr(res, "boxes") and len(res.boxes) > 0:
@@ -188,9 +186,9 @@ if __name__ == "__main__":
 
                 person_boxes = [b for b, s, c in zip(boxes, scores, classes) if int(c) == 0 and s > 0.5]
                 if len(person_boxes) > 0:
-                    x1, y1, x2, y2 = person_boxes[0][:4]
-                    cx = int((x1 + x2) / 2)
-                    cy = int((y1 + y2) / 2)
+                    x1, y1, x2, y2 = person_boxes[0][:4].astype(int)
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
                     area = (x2 - x1) * (y2 - y1)
 
                     move_towards_person(cx, cy, frame.shape[1], frame.shape[0], area)
@@ -199,7 +197,6 @@ if __name__ == "__main__":
             else:
                 cv2.putText(frame, "No detection", (10,70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
-            
             if time.time() - last_detection_time > DETECTION_TIMEOUT:
                 print(f"No detection for {DETECTION_TIMEOUT:.0f}s → AUTO LAND")
                 vehicle.mode = VehicleMode("LAND")

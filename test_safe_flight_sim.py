@@ -1,6 +1,7 @@
 # Author: Pham Thanh Bien
-# Date: 2025-09-25 (modified 2025-11-06)
-# Description: Tracking drone using YOLO, max altitude 1.4m, auto-land if no person detected
+# Date: 2025-09-25
+# Description: A simple tracking drone using YOLO model in Gazebo simulation
+# Run terminal: python thead_tracking_gazebo_sim.py with gz and ardupilot SITL
 
 import cv2
 import torch
@@ -40,6 +41,10 @@ cap = None
 def capture_loop():
     global latest_frame, cap, stop_threads
     cap_local = cv2.VideoCapture(0)
+    if not cap_local.isOpened():
+        print("Camera open failed")
+        stop_threads = True
+        return
     cap_local.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap_local.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
     cap = cap_local
@@ -66,7 +71,8 @@ def detection_loop(confidence=0.5, imgsz=640):
             continue
 
         try:
-            results = model.predict(source=frame_copy, conf=confidence, imgsz=imgsz, device=device, verbose=False)
+            results = model.predict(source=frame_copy, conf=confidence, imgsz=imgsz,
+                                    device=device, verbose=False)
             if results and len(results) > 0:
                 with result_lock:
                     latest_result = results[0]
@@ -79,7 +85,7 @@ def detection_loop(confidence=0.5, imgsz=640):
                 latest_result = None
         time.sleep(0.01)
 
-# ==================== support ==================== #
+# ==================== support functions ==================== #
 def draw_bounding_boxes(frame, boxes):
     for box in boxes:
         x1, y1, x2, y2 = map(int, box[:4])
@@ -110,7 +116,8 @@ def arm_and_takeoff(aTargetAltitude):
         time.sleep(0.5)
     return True
 
-MAX_SPEED = 1
+MAX_SPEED = 1.0
+
 def send_ned_velocity(vx, vy, vz, duration=0.2):
     vx = float(np.clip(vx, -MAX_SPEED, MAX_SPEED))
     vy = float(np.clip(vy, -MAX_SPEED, MAX_SPEED))
@@ -129,52 +136,54 @@ def send_ned_velocity(vx, vy, vz, duration=0.2):
         vehicle.flush()
         time.sleep(0.05)
 
+NO_DETECT_TIMEOUT = 5.0  # seconds to wait before landing
+TARGET_ALT = 1.4  # fixed altitude
+
 def move_towards_person(cx, cy, frame_w, frame_h, area):
     SAFE_RATIO = 0.50
-    HYSTERESIS = 0.12
     KP_DIST = 0.6
     KP_LAT = 0.5
     MIN_SPEED = 0.06
 
     frame_area = frame_w * frame_h
     safe_area = frame_area * SAFE_RATIO
-    lower = safe_area * (1 - HYSTERESIS)
-    upper = safe_area * (1 + HYSTERESIS)
 
     vy = (cx - frame_w / 2) / (frame_w / 2)
     vy_cmd = KP_LAT * vy
+    vy_cmd = float(np.clip(vy_cmd, -MAX_SPEED, MAX_SPEED))
+    if 0 < abs(vy_cmd) < MIN_SPEED:
+        vy_cmd = np.sign(vy_cmd) * MIN_SPEED
 
-    # Forward/backward
+    lower = safe_area * 0.88
+    upper = safe_area * 1.12
+
     if area < lower:
-        vx_cmd = KP_DIST * (safe_area - area) / safe_area
+        err = (safe_area - area) / safe_area
+        vx_cmd = KP_DIST * err
     elif area > upper:
-        vx_cmd = -KP_DIST * (area - safe_area) / safe_area
+        err = (area - safe_area) / safe_area
+        vx_cmd = -KP_DIST * err
     else:
         vx_cmd = 0.0
 
-    # Minimal speed
     if 0 < abs(vx_cmd) < MIN_SPEED:
         vx_cmd = np.sign(vx_cmd) * MIN_SPEED
 
-    # Clip and keep altitude fixed
-    vx_cmd = float(np.clip(vx_cmd, -MAX_SPEED, MAX_SPEED))
-    vy_cmd = float(np.clip(vy_cmd, -MAX_SPEED, MAX_SPEED))
-    vz_cmd = 0.0  # FIXED altitude
-
-    print(f"[move] area={int(area)} vx={vx_cmd:.3f} vy={vy_cmd:.3f} vz={vz_cmd:.3f}")
-    send_ned_velocity(vx_cmd, vy_cmd, vz_cmd, duration=0.2)
+    vz_cmd = 0.0  # fixed altitude
+    send_ned_velocity(float(np.clip(vx_cmd, -MAX_SPEED, MAX_SPEED)),
+                      vy_cmd, vz_cmd, duration=0.2)
 
 # ==================== main ==================== #
 if __name__ == "__main__":
     try:
+        # start threads BEFORE arming
         t1 = Thread(target=capture_loop, daemon=True)
         t2 = Thread(target=detection_loop, daemon=True)
         t1.start()
         t2.start()
-        time.sleep(0.5)
+        time.sleep(0.5)  # ensure camera ready
 
-        TARGET_ALTITUDE = 1.4
-        if not arm_and_takeoff(TARGET_ALTITUDE):
+        if not arm_and_takeoff(5):
             print("Arming/takeoff failed")
             stop_threads = True
             t1.join(timeout=1.0)
@@ -185,7 +194,7 @@ if __name__ == "__main__":
         print("Starting main loop...")
         prev_time = time.time()
         last_detect_time = time.time()
-        NO_DETECT_TIMEOUT = 5.0  # seconds
+        person_boxes = []
 
         while True:
             with frame_lock:
@@ -197,46 +206,55 @@ if __name__ == "__main__":
             with result_lock:
                 res = latest_result
 
-            person_boxes = []
             if res is not None and hasattr(res, "boxes") and len(res.boxes) > 0:
                 try:
                     boxes = res.boxes.xyxy.cpu().numpy()
                     scores = res.boxes.conf.cpu().numpy()
                     classes = res.boxes.cls.cpu().numpy()
                 except Exception:
-                    boxes = np.array([]); scores = np.array([]); classes = np.array([])
+                    boxes, scores, classes = np.array([]), np.array([]), np.array([])
 
                 person_boxes = [
                     box for box, score, cls in zip(boxes, scores, classes)
                     if int(cls) == 0 and score > 0.5
                 ]
 
-            if person_boxes:
-                last_detect_time = time.time()
-                x1, y1, x2, y2 = person_boxes[0][:4]
-                cx = int((x1 + x2) / 2)
-                cy = int((y1 + y2) / 2)
-                area = (x2 - x1) * (y2 - y1)
-                print(f"Person at ({cx},{cy}), area={int(area)}")
-                move_towards_person(cx, cy, frame.shape[1], frame.shape[0], area)
-                frame = draw_bounding_boxes(frame, person_boxes)
+                if len(person_boxes) > 0:
+                    last_detect_time = time.time()
+                    x1, y1, x2, y2 = person_boxes[0][:4]
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+                    area = (x2 - x1) * (y2 - y1)
+                    print(f"Person at ({cx},{cy}), area={int(area)}")
+                    move_towards_person(cx, cy, frame.shape[1], frame.shape[0], area)
+                    frame = draw_bounding_boxes(frame, person_boxes)
+                else:
+                    cv2.putText(frame, "No person (filtered)", (10,70),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
             else:
-                cv2.putText(frame, "No detection", (10,70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
-                if time.time() - last_detect_time > NO_DETECT_TIMEOUT:
-                    print("No person detected for 5s -> landing")
-                    vehicle.mode = VehicleMode("LAND")
-                    break
+                cv2.putText(frame, "No detection", (10,70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
-            now = time.time()
-            fps = 1.0 / (now - prev_time) if (now - prev_time) > 0 else 0.0
-            prev_time = now
-            cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-            cv2.imshow("YOLO Drone Tracking", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
+            # check timeout
+            if time.time() - last_detect_time > NO_DETECT_TIMEOUT:
+                print(f"No person detected for {NO_DETECT_TIMEOUT}s. Landing...")
                 vehicle.mode = VehicleMode("LAND")
                 break
+
+            # FPS
+            now = time.time()
+            fps = 1.0 / max(now - prev_time, 1e-5)
+            prev_time = now
+            cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+            cv2.imshow("YOLO Drone Tracking", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        print("Landing...")
+        vehicle.mode = VehicleMode("LAND")
+        time.sleep(5)
 
     except KeyboardInterrupt:
         print("Interrupted by user")
@@ -244,12 +262,28 @@ if __name__ == "__main__":
     finally:
         stop_threads = True
         time.sleep(0.2)
+
+        try:
+            print("Switching to RTL mode...")
+            vehicle.mode = VehicleMode("RTL")
+            time.sleep(2)
+            print("Switching to LAND mode...")
+            vehicle.mode = VehicleMode("LAND")
+            time.sleep(2)
+        except Exception as e:
+            print(f"Error during RTL/LAND: {e}")
+
         try:
             vehicle.close()
             print("Vehicle connection closed.")
         except Exception as e:
             print(f"Error closing vehicle: {e}")
-        if cap is not None:
-            cap.release()
+
+        try:
+            if cap is not None:
+                cap.release()
+        except Exception as e:
+            print(f"Error releasing camera: {e}")
+
         cv2.destroyAllWindows()
         print("Closed and landed safely.")

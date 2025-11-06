@@ -183,7 +183,7 @@ if __name__ == "__main__":
         t2.start()
         time.sleep(0.5)  # ensure camera ready
 
-        if not arm_and_takeoff(5):
+        if not arm_and_takeoff(TARGET_ALT):
             print("Arming/takeoff failed")
             stop_threads = True
             t1.join(timeout=1.0)

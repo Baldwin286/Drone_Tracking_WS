@@ -92,7 +92,7 @@ def draw_bounding_boxes(frame, boxes):
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
     return frame
 
-def arm_and_takeoff(aTargetAltitude):
+def arm_and_takeoff(aTargetAltitude, timeout=20):
     print("Arming motors...")
     vehicle.mode = VehicleMode("GUIDED")
     vehicle.armed = True
@@ -107,11 +107,15 @@ def arm_and_takeoff(aTargetAltitude):
     print(f"Taking off to {aTargetAltitude} m")
     vehicle.simple_takeoff(aTargetAltitude)
 
+    t_start = time.time()
     while True:
         alt = vehicle.location.global_relative_frame.alt
-        print(" Altitude:", round(alt, 2))
+        print(f" Altitude: {alt:.2f} m")
         if alt >= aTargetAltitude * 0.95:
             print("Reached target altitude")
+            break
+        if time.time() - t_start > timeout:  # thoát sau timeout
+            print(f"Takeoff timeout ({alt:.2f} m), continue anyway...")
             break
         time.sleep(0.5)
     return True

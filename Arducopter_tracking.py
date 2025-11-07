@@ -8,6 +8,7 @@ from dronekit import connect, VehicleMode
 from pymavlink import mavutil
 from ultralytics import YOLO
 from picamera2 import Picamera2
+from flask import Flask, Response
 
 # ==================== connect vehicle via UART ==================== #
 CONN = '/dev/ttyAMA0'  
@@ -34,6 +35,34 @@ stop_threads = False
 frame_lock = Lock()
 result_lock = Lock()
 cap = None
+# ==================== Flask streaming ==================== #
+app = Flask(__name__)
+
+def generate_stream():
+    global latest_frame
+    while not stop_threads:
+        with frame_lock:
+            if latest_frame is None:
+                continue
+            frame = latest_frame.copy()
+
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        if not ret:
+            continue
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        time.sleep(0.01)
+
+@app.route('/video')
+def video_feed():
+    return Response(generate_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/')
+def index():
+    return "<h1>YOLO Drone Tracking Stream</h1><img src='/video' width='640'>"
+
+def flask_stream_thread():
+    app.run(host='0.0.0.0', port=5000, threaded=True, use_reloader=False)
 
 # ==================== read camera thread ==================== #
 def capture_loop():
@@ -183,8 +212,10 @@ if __name__ == "__main__":
         # start threads BEFORE arming
         t1 = Thread(target=capture_loop, daemon=True)
         t2 = Thread(target=detection_loop, daemon=True)
+        t3 = Thread(target=flask_stream_thread, daemon=True)
         t1.start()
         t2.start()
+        t3.start()
         time.sleep(0.5)  # ensure camera ready
 
         if not arm_and_takeoff(TARGET_ALT):

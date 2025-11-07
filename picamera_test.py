@@ -62,10 +62,8 @@ picam2.start()
 def generate():
     while True:
         frame = picam2.capture_array()
-        # Nếu bạn có YOLO tracking, bạn có thể vẽ bounding box ở đây
-        # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        # cv2.putText(frame, "target", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-        
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
             continue
@@ -81,5 +79,4 @@ def index():
     return "<h1>Drone Camera Stream</h1><img src='/video' width='640'>"
 
 if __name__ == '__main__':
-    # Lắng nghe trên tất cả IP, kể cả IP Tailscale
     app.run(host='0.0.0.0', port=5000, threaded=True)

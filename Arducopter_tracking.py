@@ -22,7 +22,7 @@ print("Connected to real vehicle!")
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device:", device)
 
-MODEL_PATH = '/home/phamthanhbien/yolo/my_model.pt'
+MODEL_PATH = '/home/bien/Drone_Tracking_WS/model/my_model.pt'
 if not torch.cuda.is_available():
     print("Note: CUDA not available -> model will run on CPU (slower).")
 

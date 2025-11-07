@@ -24,13 +24,33 @@ result_lock = Lock()
 # ==================== Flask streaming ==================== #
 app = Flask(__name__)
 
+def draw_bboxes(frame, res):
+    if res is None or not hasattr(res, "boxes"):
+        return frame
+    try:
+        boxes = res.boxes.xyxy.cpu().numpy()
+        scores = res.boxes.conf.cpu().numpy()
+        classes = res.boxes.cls.cpu().numpy()
+    except Exception:
+        return frame
+    for box, cls, score in zip(boxes, classes, scores):
+        x1, y1, x2, y2 = map(int, box[:4])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f"{int(cls)} {score:.2f}", (x1, y1-5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+    return frame
+
 def generate_stream():
-    global latest_frame
+    global latest_frame, latest_result
     while not stop_threads:
         with frame_lock:
             if latest_frame is None:
                 continue
             frame = latest_frame.copy()
+        with result_lock:
+            res = latest_result
+        frame = draw_bboxes(frame, res)  # vẽ bounding box trước khi encode
+
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         if not ret:
             continue
@@ -98,24 +118,9 @@ def detection_loop(confidence=0.5, imgsz=640):
                 latest_result = None
         time.sleep(0.01)
 
-def draw_bboxes(frame, res):
-    if res is None or not hasattr(res, "boxes"):
-        return frame
-    try:
-        boxes = res.boxes.xyxy.cpu().numpy()
-        scores = res.boxes.conf.cpu().numpy()
-        classes = res.boxes.cls.cpu().numpy()
-    except Exception:
-        return frame
-    for box, cls, score in zip(boxes, classes, scores):
-        x1, y1, x2, y2 = map(int, box[:4])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(frame, f"{int(cls)} {score:.2f}", (x1, y1-5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
-    return frame
-
 # ==================== Main ==================== #
 if __name__ == "__main__":
+    # start threads
     t1 = Thread(target=capture_loop, daemon=True)
     t2 = Thread(target=detection_loop, daemon=True)
     t3 = Thread(target=flask_thread, daemon=True)
@@ -126,21 +131,11 @@ if __name__ == "__main__":
 
     try:
         while True:
-            with frame_lock:
-                if latest_frame is None:
-                    continue
-                frame = latest_frame.copy()
-            with result_lock:
-                res = latest_result
-            frame = draw_bboxes(frame, res)
-            # Optional local preview
-            # cv2.imshow("YOLO Detect Test", frame)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
+            time.sleep(1)  
     except KeyboardInterrupt:
         pass
     finally:
         stop_threads = True
-        time.sleep(0.2)
+        time.sleep(0.5)
         cv2.destroyAllWindows()
         print("Test detect stopped.")

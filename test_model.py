@@ -134,9 +134,9 @@ if __name__ == "__main__":
                 res = latest_result
             frame = draw_bboxes(frame, res)
             # Optional local preview
-            cv2.imshow("YOLO Detect Test", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            # cv2.imshow("YOLO Detect Test", frame)
+            # if cv2.waitKey(1) & 0xFF == ord('q'):
+            #     break
     except KeyboardInterrupt:
         pass
     finally:

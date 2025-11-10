@@ -44,14 +44,18 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
-
+# --- Initialize camera ---
 picam2 = Picamera2()
 config = picam2.create_video_configuration(main={"size": (640, 360)})
 picam2.configure(config)
+
+
+picam2.set_controls({
+    "AfMode": 0,          
+    "LensPosition": 0.2   
+})
+
 picam2.start()
-
-
-autofocus_on = True
 
 def generate():
     while True:
@@ -75,30 +79,9 @@ def video_feed():
 
 @app.route('/')
 def index():
-    return """
-    <h1>Drone Camera Stream</h1>
-    <img src='/video' width='640'><br>
-    <a href='/focus/on'>Autofocus ON</a> | 
-    <a href='/focus/off'>Autofocus OFF</a>
-    """
-
-
-@app.route('/focus/on')
-def focus_on():
-    global autofocus_on
-    picam2.set_controls({"AfMode": 2}) 
-    autofocus_on = True
-    return "Autofocus ON"
-
-
-@app.route('/focus/off')
-def focus_off():
-    global autofocus_on
-    picam2.set_controls({"AfMode": 0})  
-    picam2.set_controls({"LensPosition": 0.0})  
-    autofocus_on = False
-    return "Autofocus OFF (manual focus @ infinity)"
+    return "<h1>🚁 Drone Camera Stream (AF OFF)</h1><img src='/video' width='640'>"
 
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
+

@@ -1,23 +1,30 @@
-# from flask import Flask, Response
 # from picamera2 import Picamera2
 # import cv2
+# from flask import Flask, Response
 
 # app = Flask(__name__)
 
-# # Init camera
+# # Initialize camera
 # picam2 = Picamera2()
-# config = picam2.create_preview_configuration(main={"size": (640, 360)})
+# config = picam2.create_video_configuration(main={"size": (640, 360)})
 # picam2.configure(config)
 # picam2.start()
 
+# autofocus_on = True
 # def generate():
 #     while True:
-#         frame = picam2.capture_array()
+#         request = picam2.capture_request()
+#         frame = request.make_array("main")
+#         request.release()
+
+#         # Correct color for OpenCV
 #         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-#         ret, buffer = cv2.imencode('.jpg', frame)
+#         # Encode JPEG with lower quality (faster)
+#         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
 #         if not ret:
 #             continue
+
 #         yield (b'--frame\r\n'
 #                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
@@ -31,23 +38,20 @@
 
 # if __name__ == '__main__':
 #     app.run(host='0.0.0.0', port=5000, threaded=True)
-"""
-Stream Pi Camera (Picamera2) to browser over Tailscale network
-Optimized for lower latency
-Author: Pham Thanh Bien
-"""
-
 from picamera2 import Picamera2
 import cv2
 from flask import Flask, Response
 
 app = Flask(__name__)
 
-# Initialize camera
+
 picam2 = Picamera2()
 config = picam2.create_video_configuration(main={"size": (640, 360)})
 picam2.configure(config)
 picam2.start()
+
+
+autofocus_on = True
 
 def generate():
     while True:
@@ -55,10 +59,7 @@ def generate():
         frame = request.make_array("main")
         request.release()
 
-        # Correct color for OpenCV
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-        # Encode JPEG with lower quality (faster)
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         if not ret:
             continue
@@ -66,13 +67,38 @@ def generate():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
+
 @app.route('/video')
 def video_feed():
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+
 @app.route('/')
 def index():
-    return "<h1>Drone Camera Stream</h1><img src='/video' width='640'>"
+    return """
+    <h1>Drone Camera Stream</h1>
+    <img src='/video' width='640'><br>
+    <a href='/focus/on'>Autofocus ON</a> | 
+    <a href='/focus/off'>Autofocus OFF</a>
+    """
+
+
+@app.route('/focus/on')
+def focus_on():
+    global autofocus_on
+    picam2.set_controls({"AfMode": 2}) 
+    autofocus_on = True
+    return "Autofocus ON"
+
+
+@app.route('/focus/off')
+def focus_off():
+    global autofocus_on
+    picam2.set_controls({"AfMode": 0})  
+    picam2.set_controls({"LensPosition": 0.0})  
+    autofocus_on = False
+    return "Autofocus OFF (manual focus @ infinity)"
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)

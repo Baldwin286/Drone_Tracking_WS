@@ -11,17 +11,16 @@ from picamera2 import Picamera2
 from flask import Flask, Response
 
 # ==================== connect vehicle via UART ==================== #
-CONN = '/dev/ttyAMA0'  
-BAUD = 921600           
+CONN = '/dev/ttyAMA0'
+BAUD = 921600
 
 print(f"Connecting to vehicle on: {CONN} at {BAUD} baud")
-vehicle = connect(CONN, baud=BAUD, wait_ready=True, heartbeat_timeout=30)
-print("Connected to real vehicle!")
+vehicle = connect(CONN, baud=BAUD, wait_ready=False)
+print("Connected to vehicle (wait_ready=False)")
 
 # ==================== MODEL YOLO ==================== #
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device:", device)
-
 MODEL_PATH = '/home/bien/Drone_Tracking_WS/model/my_model.pt'
 model = YOLO(MODEL_PATH).to(device)
 
@@ -40,6 +39,7 @@ def generate_stream():
     while not stop_threads:
         with frame_lock:
             if latest_frame is None:
+                time.sleep(0.01)
                 continue
             frame = latest_frame.copy()
 
@@ -61,14 +61,12 @@ def index():
 def flask_stream_thread():
     app.run(host='0.0.0.0', port=5000, threaded=True, use_reloader=False)
 
-# ==================== read camera thread ==================== #
+# ==================== camera capture ==================== #
 def capture_loop():
     global latest_frame, stop_threads
     try:
         picam2 = Picamera2()
-        config = picam2.create_preview_configuration(
-            main={"size": (640, 360), "format": "RGB888"}
-        )
+        config = picam2.create_preview_configuration(main={"size": (640, 360), "format": "RGB888"})
         picam2.configure(config)
         picam2.start()
         print("Pi Camera started successfully!")
@@ -78,13 +76,13 @@ def capture_loop():
             with frame_lock:
                 latest_frame = frame.copy()
             time.sleep(0.01)
-        picam2.stop()
 
+        picam2.stop()
     except Exception as e:
         print(f"Camera init failed: {e}")
         stop_threads = True
 
-# ==================== yolo detection thread ==================== #
+# ==================== YOLO detection ==================== #
 def detection_loop(confidence=0.5, imgsz=640):
     global latest_result, stop_threads
     while not stop_threads:
@@ -99,19 +97,15 @@ def detection_loop(confidence=0.5, imgsz=640):
         try:
             results = model.predict(source=frame_copy, conf=confidence, imgsz=imgsz,
                                     device=device, verbose=False)
-            if results and len(results) > 0:
-                with result_lock:
-                    latest_result = results[0]
-            else:
-                with result_lock:
-                    latest_result = None
+            with result_lock:
+                latest_result = results[0] if results else None
         except Exception as e:
             print("YOLO inference error:", e)
             with result_lock:
                 latest_result = None
         time.sleep(0.01)
 
-# ==================== support functions ==================== #
+# ==================== helper functions ==================== #
 def draw_bounding_boxes(frame, boxes):
     for box in boxes:
         x1, y1, x2, y2 = map(int, box[:4])
@@ -132,6 +126,17 @@ def arm_motors():
     print("Motors armed.")
     return True
 
+def keep_motor_alive():
+    """Send zero throttle / attitude messages to keep motors spinning."""
+    msg = vehicle.message_factory.set_attitude_target_encode(
+        0, 0, 0, mavutil.mavlink.MAV_FRAME_BODY_NED,
+        0b00000000,
+        [0, 0, 0, 1],
+        0, 0, 0, 0
+    )
+    vehicle.send_mavlink(msg)
+    vehicle.flush()
+
 # ==================== main ==================== #
 if __name__ == "__main__":
     try:
@@ -142,7 +147,7 @@ if __name__ == "__main__":
         t1.start()
         t2.start()
         t3.start()
-        time.sleep(0.5)  # ensure camera ready
+        time.sleep(0.5)  # camera warmup
 
         if not arm_motors():
             print("Arming failed, exiting...")
@@ -150,10 +155,11 @@ if __name__ == "__main__":
             sys.exit(1)
 
         print("Starting manual tracking loop...")
-        prev_time = time.time()
         person_boxes = []
-
         while True:
+            # keep motors alive
+            keep_motor_alive()
+
             with frame_lock:
                 if latest_frame is None:
                     time.sleep(0.01)
@@ -190,16 +196,11 @@ if __name__ == "__main__":
                 cv2.putText(frame, "No detection", (10,70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
-            # FPS
+            # add FPS info
             now = time.time()
-            fps = 1.0 / max(now - prev_time, 1e-5)
-            prev_time = now
+            fps = 1.0 / max(now - time.time(), 1e-5)
             cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-            # cv2.imshow("YOLO Manual Tracking (Motors Armed)", frame)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
 
     except KeyboardInterrupt:
         print("Interrupted by user")
@@ -212,6 +213,5 @@ if __name__ == "__main__":
             vehicle.armed = False
         except Exception as e:
             print(f"Error disarming: {e}")
-        cv2.destroyAllWindows()
         vehicle.close()
         print("Closed safely.")

@@ -18,6 +18,8 @@ print(f"Connecting to vehicle on: {CONN} at {BAUD} baud")
 vehicle = connect(CONN, baud=BAUD, wait_ready=False)
 print("Connected to vehicle (wait_ready=False)")
 
+vehicle.parameters['ARMING_CHECK'] = 0
+
 # ==================== MODEL YOLO ==================== #
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Using device:", device)
@@ -42,7 +44,6 @@ def generate_stream():
                 time.sleep(0.01)
                 continue
             frame = latest_frame.copy()
-
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         if not ret:
             continue
@@ -70,13 +71,11 @@ def capture_loop():
         picam2.configure(config)
         picam2.start()
         print("Pi Camera started successfully!")
-
         while not stop_threads:
             frame = picam2.capture_array()
             with frame_lock:
                 latest_frame = frame.copy()
             time.sleep(0.01)
-
         picam2.stop()
     except Exception as e:
         print(f"Camera init failed: {e}")
@@ -93,7 +92,6 @@ def detection_loop(confidence=0.5, imgsz=640):
         if frame_copy is None:
             time.sleep(0.01)
             continue
-
         try:
             results = model.predict(source=frame_copy, conf=confidence, imgsz=imgsz,
                                     device=device, verbose=False)
@@ -127,7 +125,7 @@ def arm_motors():
     return True
 
 def keep_motor_alive():
-    """Send zero throttle / attitude messages to keep motors spinning."""
+    """Send zero attitude/throttle messages to keep motors spinning."""
     msg = vehicle.message_factory.set_attitude_target_encode(
         0, 0, 0, mavutil.mavlink.MAV_FRAME_BODY_NED,
         0b00000000,
@@ -141,12 +139,9 @@ def keep_motor_alive():
 if __name__ == "__main__":
     try:
         # start threads
-        t1 = Thread(target=capture_loop, daemon=True)
-        t2 = Thread(target=detection_loop, daemon=True)
-        t3 = Thread(target=flask_stream_thread, daemon=True)
-        t1.start()
-        t2.start()
-        t3.start()
+        Thread(target=capture_loop, daemon=True).start()
+        Thread(target=detection_loop, daemon=True).start()
+        Thread(target=flask_stream_thread, daemon=True).start()
         time.sleep(0.5)  # camera warmup
 
         if not arm_motors():
@@ -155,10 +150,9 @@ if __name__ == "__main__":
             sys.exit(1)
 
         print("Starting manual tracking loop...")
-        person_boxes = []
+        prev_time = time.time()
         while True:
-            # keep motors alive
-            keep_motor_alive()
+            keep_motor_alive()  # giữ motor quay
 
             with frame_lock:
                 if latest_frame is None:
@@ -169,36 +163,32 @@ if __name__ == "__main__":
             with result_lock:
                 res = latest_result
 
+            person_boxes = []
             if res is not None and hasattr(res, "boxes") and len(res.boxes) > 0:
                 try:
                     boxes = res.boxes.xyxy.cpu().numpy()
                     scores = res.boxes.conf.cpu().numpy()
                     classes = res.boxes.cls.cpu().numpy()
+                    person_boxes = [box for box, score, cls in zip(boxes, scores, classes)
+                                    if int(cls) == 0 and score > 0.5]
                 except Exception:
-                    boxes, scores, classes = np.array([]), np.array([]), np.array([])
+                    pass
 
-                person_boxes = [
-                    box for box, score, cls in zip(boxes, scores, classes)
-                    if int(cls) == 0 and score > 0.5
-                ]
-
-                if len(person_boxes) > 0:
-                    x1, y1, x2, y2 = person_boxes[0][:4]
-                    cx = int((x1 + x2) / 2)
-                    cy = int((y1 + y2) / 2)
-                    area = (x2 - x1) * (y2 - y1)
-                    print(f"Person at ({cx},{cy}), area={int(area)})")
-                    frame = draw_bounding_boxes(frame, person_boxes)
-                else:
-                    cv2.putText(frame, "No person (filtered)", (10,70),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
+            if len(person_boxes) > 0:
+                x1, y1, x2, y2 = person_boxes[0][:4]
+                cx = int((x1 + x2) / 2)
+                cy = int((y1 + y2) / 2)
+                area = (x2 - x1) * (y2 - y1)
+                print(f"Person at ({cx},{cy}), area={int(area)})")
+                frame = draw_bounding_boxes(frame, person_boxes)
             else:
-                cv2.putText(frame, "No detection", (10,70),
+                cv2.putText(frame, "No person (filtered)", (10,70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
             # add FPS info
             now = time.time()
-            fps = 1.0 / max(now - time.time(), 1e-5)
+            fps = 1.0 / max(now - prev_time, 1e-5)
+            prev_time = now
             cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 

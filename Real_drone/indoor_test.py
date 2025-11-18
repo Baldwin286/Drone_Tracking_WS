@@ -17,8 +17,7 @@ BAUD = 921600
 print(f"Connecting to vehicle on: {CONN} at {BAUD} baud")
 vehicle = connect(CONN, baud=BAUD, wait_ready=False)
 print("Connected to vehicle (wait_ready=False)")
-
-vehicle.parameters['ARMING_CHECK'] = 0
+vehicle.parameters['ARMING_CHECK'] = 0  # disable arming checks
 
 # ==================== MODEL YOLO ==================== #
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -124,15 +123,18 @@ def arm_motors():
     print("Motors armed.")
     return True
 
-def keep_motor_alive():
-    """Send zero throttle/attitude messages to keep motors spinning."""
+def keep_motor_alive(thrust=0.1):
+    """
+    Send attitude/thrust messages repeatedly to keep motors spinning.
+    thrust: 0.0~1.0
+    """
     msg = vehicle.message_factory.set_attitude_target_encode(
-        0,          # time_boot_ms
-        0, 0,       # target system, target component
-        0b00000000, # type_mask (none enabled)
-        [0, 0, 0, 1], # q: quaternion (no rotation)
-        0, 0, 0,      # body roll, pitch, yaw rate
-        0.1
+        0,                  # time_boot_ms
+        0, 0,               # target system, target component
+        0b00000000,         # type_mask (all rates disabled)
+        [0, 0, 0, 1],       # quaternion (no rotation)
+        0, 0, 0,            # body roll, pitch, yaw rate
+        thrust               # thrust
     )
     vehicle.send_mavlink(msg)
     vehicle.flush()
@@ -154,7 +156,7 @@ if __name__ == "__main__":
         print("Starting manual tracking loop...")
         prev_time = time.time()
         while True:
-            keep_motor_alive()  # giữ motor quay
+            keep_motor_alive(0.1)  # giữ motor quay với lực nhỏ
 
             with frame_lock:
                 if latest_frame is None:
@@ -187,7 +189,7 @@ if __name__ == "__main__":
                 cv2.putText(frame, "No person (filtered)", (10,70),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
-            # add FPS info
+            # FPS
             now = time.time()
             fps = 1.0 / max(now - prev_time, 1e-5)
             prev_time = now

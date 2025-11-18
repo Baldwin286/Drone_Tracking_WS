@@ -125,12 +125,13 @@ def arm_motors():
     return True
 
 def keep_motor_alive():
-    """Send zero attitude/throttle messages to keep motors spinning."""
+    """Send zero throttle/attitude messages to keep motors spinning."""
     msg = vehicle.message_factory.set_attitude_target_encode(
-        0, 0, 0, mavutil.mavlink.MAV_FRAME_BODY_NED,
-        0b00000000,
-        [0, 0, 0, 1],
-        0, 0, 0, 0
+        0,          # time_boot_ms
+        0, 0,       # target system, target component
+        0b00000000, # type_mask (none enabled)
+        [0, 0, 0, 1], # q: quaternion (no rotation)
+        0, 0, 0      # body roll, pitch, yaw rate
     )
     vehicle.send_mavlink(msg)
     vehicle.flush()

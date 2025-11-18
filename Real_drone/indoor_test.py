@@ -131,7 +131,8 @@ def keep_motor_alive():
         0, 0,       # target system, target component
         0b00000000, # type_mask (none enabled)
         [0, 0, 0, 1], # q: quaternion (no rotation)
-        0, 0, 0      # body roll, pitch, yaw rate
+        0, 0, 0,      # body roll, pitch, yaw rate
+        0.1
     )
     vehicle.send_mavlink(msg)
     vehicle.flush()

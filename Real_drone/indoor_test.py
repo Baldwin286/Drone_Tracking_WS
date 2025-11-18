@@ -36,13 +36,27 @@ result_lock = Lock()
 app = Flask(__name__)
 
 def generate_stream():
-    global latest_frame
+    global latest_frame, latest_result
     while not stop_threads:
         with frame_lock:
             if latest_frame is None:
                 time.sleep(0.01)
                 continue
             frame = latest_frame.copy()
+        # Vẽ bounding box trực tiếp trước khi encode
+        with result_lock:
+            res = latest_result
+        if res is not None and hasattr(res, "boxes") and len(res.boxes) > 0:
+            try:
+                boxes = res.boxes.xyxy.cpu().numpy()
+                scores = res.boxes.conf.cpu().numpy()
+                classes = res.boxes.cls.cpu().numpy()
+                person_boxes = [box for box, score, cls in zip(boxes, scores, classes)
+                                if int(cls) == 0 and score > 0.5]
+                frame = draw_bounding_boxes(frame, person_boxes)
+            except:
+                pass
+
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         if not ret:
             continue

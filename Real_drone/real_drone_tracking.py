@@ -9,6 +9,7 @@ from pymavlink import mavutil
 from ultralytics import YOLO
 from picamera2 import Picamera2
 from flask import Flask, Response
+from libcamera import controls
 
 # ==================== connect vehicle via UART ==================== #
 CONN = '/dev/ttyAMA0'  
@@ -73,6 +74,10 @@ def capture_loop():
             main={"size": (640, 360), "format": "RGB888"}
         )
         picam2.configure(config)
+        picam2.set_controls({
+            "AfMode": controls.AfModeEnum.Manual,
+            "LensPosition": 1.0 
+        })
         picam2.start()
         print("Pi Camera started successfully!")
 

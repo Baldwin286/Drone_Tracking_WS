@@ -9,7 +9,7 @@ mav.wait_heartbeat()
 print("Connected!")
 
 SERVER_IP = '0.0.0.0' 
-SERVER_PORT = 5000      
+SERVER_PORT = 5000
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind((SERVER_IP, SERVER_PORT))
 server_socket.listen(1)
@@ -21,18 +21,18 @@ def send_data(client_socket):
         if msg.get_type() == "ATTITUDE":
             data = {
                 'type': 'ATTITUDE',
-                'roll': msg.roll * 57.2958,
+                'roll': msg.roll * 57.2958,  
                 'pitch': msg.pitch * 57.2958,
                 'yaw': msg.yaw * 57.2958
             }
         elif msg.get_type() == "SYS_STATUS":
             data = {
                 'type': 'SYS_STATUS',
-                'battery': msg.voltage_battery / 1000.0
+                'battery': msg.voltage_battery / 1000.0  
             }
         
         try:
-            client_socket.sendall(str(data).encode('utf-8'))
+            client_socket.sendall((str(data) + "\n").encode('utf-8'))
         except socket.error:
             break
         time.sleep(0.1)

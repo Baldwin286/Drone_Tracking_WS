@@ -131,7 +131,7 @@ def update_ui():
     t_data = list(t_list)
     curve_roll.setData(t_data, list(roll_list), fast=True)
     curve_pitch.setData(t_data, list(pitch_list), fast=True)
-    
+
     # Normalize yaw so it starts from 0
     normalized_yaw = [yaw - yaw_list[0] for yaw in yaw_list]
     curve_yaw.setData(t_data, normalized_yaw, fast=True)
@@ -141,25 +141,21 @@ def update_ui():
 
     if roll_list and pitch_list and yaw_list:
         roll = np.radians(roll_list[-1])
-        pitch = np.radians(pitch_list[-1])  # Fix pitch (no negation)
-        yaw = -np.radians(yaw_list[-1])  # Negate yaw to correct direction
+        pitch = np.radians(pitch_list[-1])  
+        yaw = np.radians(yaw_list[-1])  
 
-        # Correct the Z-axis orientation for 3D rotation (fix the sign here for yaw)
         cz, sz = np.cos(yaw), np.sin(yaw)
-        cy, sy = np.cos(pitch), np.sin(pitch)  # Correct pitch
+        cy, sy = np.cos(pitch), np.sin(pitch)
         cx, sx = np.cos(roll), np.sin(roll)
 
-        # Rotation matrix with fixed yaw
         R = np.array([
-            [cz*cy, cz*sy*sx + sz*cx, cz*sy*cx - sz*sx],  # First column of the rotation matrix
-            [sz*cy, sz*sy*sx - cz*cx, sz*sy*cx + cz*sx],  # Second column of the rotation matrix
-            [-sy,    cy*sx,            cy*cx]               # Third column of the rotation matrix
+            [cz*cy, cz*sy*sx + sz*cx, cz*sy*cx - sz*sx],  
+            [sz*cy, sz*sy*sx - cz*cx, sz*sy*cx + cz*sx],  
+            [-sy, cy*sx, cy*cx] 
         ])
 
-        # Apply rotation to the body mesh
         body.setMeshData(vertexes=np.dot(body_verts, R.T), faces=faces, faceColors=colors)
 
-        # Apply rotation to the arms
         for idx, (dx, dy) in enumerate(arm_positions):
             verts = np.array([
                 [0, -arm_thick/2, -arm_thick/2],

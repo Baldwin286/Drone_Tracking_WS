@@ -75,7 +75,7 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import threading
 import time
 
-# ======== UI ĐẸP NHƯ MATPLOTLIB ========
+# ======== MATPLOTLIB ========
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOption('antialias', True)
@@ -124,7 +124,7 @@ batt_list = []
 MAX_POINTS = 600
 start = time.time()
 
-# ======== THREAD: READ MAVLINK (KHÔNG BỊ MẤT GÓI) ========
+# ======== THREAD: READ MAVLINK ========
 def mav_reader():
     while True:
         msg = mav.recv_match(type=["ATTITUDE", "SYS_STATUS"], blocking=True)
@@ -162,7 +162,7 @@ def update_ui():
 
 timer = QtCore.QTimer()
 timer.timeout.connect(update_ui)
-timer.start(16)  # 60 FPS UI only
+timer.start(16)  
 
 app.exec()
 

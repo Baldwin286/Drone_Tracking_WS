@@ -4,7 +4,7 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import threading
 import time
 from collections import deque
-import ast  # Để chuyển đổi từ string JSON sang dict
+import ast  
 
 # ======== UI SETTINGS ========
 pg.setConfigOption('background', 'w')
@@ -12,7 +12,7 @@ pg.setConfigOption('foreground', 'k')
 pg.setConfigOption('antialias', True)
 
 # ======== QT APP ========
-app = QtWidgets.QApplication([])  # Khởi tạo ứng dụng Qt
+app = QtWidgets.QApplication([])  
 win = pg.GraphicsLayoutWidget(title="Realtime Drone Telemetry")
 win.resize(900, 700)
 win.show()
@@ -49,18 +49,18 @@ batt_list = deque(maxlen=MAX_POINTS)
 start = time.time()
 
 # ======== SOCKET CLIENT ========
-CLIENT_IP = '100.105.38.109'  # Địa chỉ IP Tailscale của Raspberry Pi
-CLIENT_PORT = 5000             # Cổng của server Raspberry Pi
+CLIENT_IP = '100.105.38.109'  
+CLIENT_PORT = 5000             
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-# ======== KẾT NỐI TỚI SERVER ========
+# ======== CONNECT TO SERVER ========
 try:
     client_socket.connect((CLIENT_IP, CLIENT_PORT))
     print(f"Đã kết nối tới {CLIENT_IP}:{CLIENT_PORT}")
 except Exception as e:
     print(f"Không thể kết nối tới {CLIENT_IP}:{CLIENT_PORT}. Lỗi: {e}")
-    exit(1)  # Dừng chương trình nếu không thể kết nối
+    exit(1)  
 
 # ======== RECEIVE DATA ========
 buffer = ""
@@ -69,13 +69,12 @@ def receive_data():
     global buffer
     while True:
         try:
-            chunk = client_socket.recv(1024).decode('utf-8')  # Đọc dữ liệu từ server
+            chunk = client_socket.recv(1024).decode('utf-8')  
             if not chunk:
-                continue  # Nếu không có dữ liệu, tiếp tục vòng lặp
+                continue  
 
             buffer += chunk
 
-            # Xử lý từng dòng dữ liệu nhận được
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
 
@@ -83,11 +82,10 @@ def receive_data():
                     continue
 
                 try:
-                    data_dict = ast.literal_eval(line)  # Chuyển đổi string thành dict
-                    print(f"Received data: {data_dict}")  # Debugging
+                    data_dict = ast.literal_eval(line)  
+                    print(f"Received data: {data_dict}")  
                     t_data = time.time() - start
 
-                    # Cập nhật dữ liệu vào các list
                     if data_dict['type'] == 'ATTITUDE':
                         roll_list.append(data_dict['roll'])
                         pitch_list.append(data_dict['pitch'])
@@ -98,12 +96,12 @@ def receive_data():
                         t_list.append(t_data)
 
                 except Exception as e:
-                    print(f"Error parsing data: {e}")  # Debug lỗi khi phân tích dữ liệu
+                    print(f"Error parsing data: {e}")  
 
         except Exception as e:
-            print(f"Error receiving data: {e}")  # Debug lỗi khi nhận dữ liệu
+            print(f"Error receiving data: {e}")  
 
-        time.sleep(0.1)  # Thêm một chút thời gian để giảm tải CPU
+        time.sleep(0.1)  
 
 # Start data receiving thread
 threading.Thread(target=receive_data, daemon=True).start()
@@ -111,7 +109,7 @@ threading.Thread(target=receive_data, daemon=True).start()
 # ======== UPDATE UI ========
 def update_ui():
     if not t_list:
-        return  # Nếu không có dữ liệu, không làm gì
+        return  
 
     t_data = list(t_list)
     curve_roll.setData(t_data, list(roll_list), fast=True)
@@ -130,4 +128,4 @@ timer.timeout.connect(update_ui)
 timer.start(16)  # 16 ms -> ~60 FPS
 
 # ======== START APP ========
-app.exec()  # Bắt đầu ứng dụng PyQt
+app.exec()  

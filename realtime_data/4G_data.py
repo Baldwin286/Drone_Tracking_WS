@@ -11,7 +11,7 @@ print("Connected!")
 
 # Thiết lập server TCP
 SERVER_IP = '100.97.30.93'  # Lắng nghe trên tất cả các giao diện
-SERVER_PORT = 5000
+SERVER_PORT = 54576
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 try:

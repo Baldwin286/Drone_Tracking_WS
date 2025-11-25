@@ -4,8 +4,6 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import threading
 import time
 from collections import deque
-import pyqtgraph.opengl as gl
-import numpy as np
 import ast  # Để chuyển đổi từ string JSON sang dict
 
 # ======== UI SETTINGS ========
@@ -51,20 +49,37 @@ batt_list = deque(maxlen=MAX_POINTS)
 start = time.time()
 
 # ======== SOCKET CLIENT ========
-CLIENT_IP = '100.105.38.109'  
-CLIENT_PORT = 5000             
+CLIENT_IP = '100.105.38.109'  # Địa chỉ IP Tailscale của Raspberry Pi
+CLIENT_PORT = 5000             # Cổng của server Raspberry Pi
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((CLIENT_IP, CLIENT_PORT))
 
+# ======== RECEIVE DATA ========
+buffer = ""
+
 def receive_data():
+    global buffer
     while True:
-        data = client_socket.recv(1024).decode('utf-8')
-        if data:
+        chunk = client_socket.recv(1024).decode('utf-8')
+        if not chunk:
+            continue
+
+        buffer += chunk
+
+        # Xử lý từng dòng dữ liệu nhận được
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+
+            if not line.strip():
+                continue
+
             try:
-                data_dict = ast.literal_eval(data)  
-                
+                data_dict = ast.literal_eval(line)
+                print(f"Received data: {data_dict}")  # Debugging
                 t_data = time.time() - start
+
+                # Cập nhật dữ liệu vào các list
                 if data_dict['type'] == 'ATTITUDE':
                     roll_list.append(data_dict['roll'])
                     pitch_list.append(data_dict['pitch'])
@@ -73,14 +88,15 @@ def receive_data():
                 elif data_dict['type'] == 'SYS_STATUS':
                     batt_list.append(data_dict['battery'])
                     t_list.append(t_data)
-                
+
             except Exception as e:
                 print(f"Error: {e}")
         time.sleep(0.1)
 
+# Start data receiving thread
 threading.Thread(target=receive_data, daemon=True).start()
 
-# ======== TIMER: UPDATE UI & 3D ========
+# ======== UPDATE UI ========
 def update_ui():
     if not t_list:
         return
@@ -99,7 +115,7 @@ def update_ui():
 # ======== START TIMER ========
 timer = QtCore.QTimer()
 timer.timeout.connect(update_ui)
-timer.start(16)
+timer.start(16)  # 16 ms -> ~60 FPS
 
 # ======== START APP ========
 app.exec()

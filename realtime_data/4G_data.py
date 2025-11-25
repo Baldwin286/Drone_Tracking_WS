@@ -24,9 +24,12 @@ except socket.error as e:
 
 # Hàm gửi dữ liệu tới client
 def send_data(client_socket):
+    print("Thread started for sending data.")
     while True:
         try:
             msg = mav.recv_match(type=["ATTITUDE", "SYS_STATUS"], blocking=True)
+            print(f"Received message: {msg}")  # In ra thông báo để kiểm tra dữ liệu nhận được
+
             if msg.get_type() == "ATTITUDE":
                 data = {
                     'type': 'ATTITUDE',
@@ -42,10 +45,9 @@ def send_data(client_socket):
 
             # In dữ liệu trước khi gửi đi
             print("SEND:", data)
-            
             client_socket.sendall((str(data) + "\n").encode('utf-8'))
         except socket.error as e:
-            print(f"Lỗi socket: {e}")
+            print(f"Lỗi khi gửi dữ liệu qua socket: {e}")
             break
         except Exception as e:
             print(f"Lỗi khác: {e}")

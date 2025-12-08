@@ -18,6 +18,17 @@ print("Waiting for heartbeat...")
 mav.wait_heartbeat()
 print("Connected!")
 
+# ==== FORCE FLIGHT CONTROLLER TO START SENDING DATA ====
+print("Requesting data streams...")
+
+mav.mav.request_data_stream_send(
+    mav.target_system,
+    mav.target_component,
+    mavutil.mavlink.MAV_DATA_STREAM_ALL,
+    10,   # 30 Hz
+    1     # start streaming
+)
+
 # ======== QT APP ========
 app = QtWidgets.QApplication([])
 win = pg.GraphicsLayoutWidget(title="Realtime Drone Telemetry")
@@ -124,38 +135,104 @@ for idx, (dx, dy) in enumerate(arm_positions):
     arms.append(arm)
 
 # ======== TIMER: UPDATE UI & 3D ========
+# def update_ui():
+#     if not t_list:
+#         return
+
+#     t_data = list(t_list)
+#     curve_roll.setData(t_data, list(roll_list), fast=True)
+#     curve_pitch.setData(t_data, list(pitch_list), fast=True)
+
+#     # Normalize yaw so it starts from 0
+#     normalized_yaw = [yaw - yaw_list[0] for yaw in yaw_list]
+#     curve_yaw.setData(t_data, normalized_yaw, fast=True)
+
+#     if batt_list:
+#         curve_batt.setData(t_data[-len(batt_list):], list(batt_list), fast=True)
+
+#     if roll_list and pitch_list and yaw_list:
+#         roll = np.radians(roll_list[-1])
+#         pitch = np.radians(pitch_list[-1])  
+#         yaw = np.radians(yaw_list[-1])  
+
+#         cz, sz = np.cos(yaw), np.sin(yaw)
+#         cy, sy = np.cos(pitch), np.sin(pitch)
+#         cx, sx = np.cos(roll), np.sin(roll)
+
+#         R = np.array([
+#             [cz*cy, cz*sy*sx + sz*cx, cz*sy*cx - sz*sx],  
+#             [sz*cy, sz*sy*sx - cz*cx, sz*sy*cx + cz*sx],  
+#             [-sy, cy*sx, cy*cx] 
+#         ])
+
+#         body.setMeshData(vertexes=np.dot(body_verts, R.T), faces=faces, faceColors=colors)
+
+#         for idx, (dx, dy) in enumerate(arm_positions):
+#             verts = np.array([
+#                 [0, -arm_thick/2, -arm_thick/2],
+#                 [arm_length*dx, -arm_thick/2, -arm_thick/2],
+#                 [arm_length*dx, arm_thick/2, -arm_thick/2],
+#                 [0, arm_thick/2, -arm_thick/2],
+#                 [0, -arm_thick/2, arm_thick/2],
+#                 [arm_length*dx, -arm_thick/2, arm_thick/2],
+#                 [arm_length*dx, arm_thick/2, arm_thick/2],
+#                 [0, arm_thick/2, arm_thick/2],
+#             ])
+#             arms[idx].setMeshData(vertexes=np.dot(verts, R.T),
+#                                   faces=faces,
+#                                   faceColors=np.array([arm_colors[idx]]*12))
+
+roll_offset = None
+pitch_offset = None
+yaw_offset = None
 def update_ui():
+    global roll_offset, pitch_offset, yaw_offset
+
     if not t_list:
         return
 
-    t_data = list(t_list)
-    curve_roll.setData(t_data, list(roll_list), fast=True)
-    curve_pitch.setData(t_data, list(pitch_list), fast=True)
+    # ==== Step 1: Ensure offsets are initialized ====
+    if roll_offset is None:
+        roll_offset = roll_list[0]
+        pitch_offset = pitch_list[0]
+        yaw_offset = yaw_list[0]
 
-    # Normalize yaw so it starts from 0
-    normalized_yaw = [yaw - yaw_list[0] for yaw in yaw_list]
-    curve_yaw.setData(t_data, normalized_yaw, fast=True)
+    # ==== Step 2: Normalize values ====
+    norm_roll  = [r - roll_offset  for r in roll_list]
+    norm_pitch = [p - pitch_offset for p in pitch_list]
+    norm_yaw   = [y - yaw_offset   for y in yaw_list]
+
+    t_data = list(t_list)
+
+    # ==== Update plots ====
+    curve_roll.setData(t_data, norm_roll, fast=True)
+    curve_pitch.setData(t_data, norm_pitch, fast=True)
+    curve_yaw.setData(t_data, norm_yaw, fast=True)
 
     if batt_list:
         curve_batt.setData(t_data[-len(batt_list):], list(batt_list), fast=True)
 
-    if roll_list and pitch_list and yaw_list:
-        roll = np.radians(roll_list[-1])
-        pitch = np.radians(pitch_list[-1])  
-        yaw = np.radians(yaw_list[-1])  
+    # ==== Update 3D Model ====
+    if norm_roll and norm_pitch and norm_yaw:
+        roll  = np.radians(norm_roll[-1])
+        pitch = np.radians(norm_pitch[-1])
+        yaw   = np.radians(norm_yaw[-1])
 
         cz, sz = np.cos(yaw), np.sin(yaw)
         cy, sy = np.cos(pitch), np.sin(pitch)
         cx, sx = np.cos(roll), np.sin(roll)
 
         R = np.array([
-            [cz*cy, cz*sy*sx + sz*cx, cz*sy*cx - sz*sx],  
-            [sz*cy, sz*sy*sx - cz*cx, sz*sy*cx + cz*sx],  
-            [-sy, cy*sx, cy*cx] 
+            [cz*cy, cz*sy*sx + sz*cx, cz*sy*cx - sz*sx],
+            [sz*cy, sz*sy*sx - cz*cx, sz*sy*cx + cz*sx],
+            [-sy,   cy*sx,            cy*cx]
         ])
 
-        body.setMeshData(vertexes=np.dot(body_verts, R.T), faces=faces, faceColors=colors)
+        # body
+        body.setMeshData(vertexes=np.dot(body_verts, R.T),
+                         faces=faces, faceColors=colors)
 
+        # arms
         for idx, (dx, dy) in enumerate(arm_positions):
             verts = np.array([
                 [0, -arm_thick/2, -arm_thick/2],
@@ -167,10 +244,12 @@ def update_ui():
                 [arm_length*dx, arm_thick/2, arm_thick/2],
                 [0, arm_thick/2, arm_thick/2],
             ])
-            arms[idx].setMeshData(vertexes=np.dot(verts, R.T),
-                                  faces=faces,
-                                  faceColors=np.array([arm_colors[idx]]*12))
 
+            arms[idx].setMeshData(
+                vertexes=np.dot(verts, R.T),
+                faces=faces,
+                faceColors=np.array([arm_colors[idx]] * 12)
+            )
 # ======== START TIMER ========
 timer = QtCore.QTimer()
 timer.timeout.connect(update_ui)
